@@ -9,17 +9,33 @@ import '../../widgets/fade_in.dart';
 import '../../widgets/rating_stars.dart';
 import '../../widgets/review_tile.dart';
 
-class DoctorReviewsScreen extends StatelessWidget {
+class DoctorReviewsScreen extends StatefulWidget {
   final Doctor doctor;
 
   const DoctorReviewsScreen({super.key, required this.doctor});
 
   @override
+  State<DoctorReviewsScreen> createState() => _DoctorReviewsScreenState();
+}
+
+class _DoctorReviewsScreenState extends State<DoctorReviewsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<ReviewProvider>().loadForDoctor(widget.doctor.id);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final doctor = widget.doctor;
     final provider = context.watch<ReviewProvider>();
     final reviews = provider.reviewsForDoctor(doctor.id);
     final rating = provider.aggregateRating(doctor);
     final count = provider.aggregateCount(doctor);
+    final loading = provider.isLoading(doctor.id) && reviews.isEmpty;
 
     // Build a simple star distribution from available reviews.
     final dist = <int, int>{5: 0, 4: 0, 3: 0, 2: 0, 1: 0};
@@ -85,15 +101,30 @@ class DoctorReviewsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          ...reviews.asMap().entries.map(
-                (e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: FadeIn(
-                    delay: Duration(milliseconds: (e.key.clamp(0, 8)) * 50),
-                    child: ReviewTile(review: e.value),
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (reviews.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text(
+                'No reviews yet. Be the first to share your experience after a '
+                'visit.',
+                style: TextStyle(color: AppColors.textTertiary),
+              ),
+            )
+          else
+            ...reviews.asMap().entries.map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: FadeIn(
+                      delay: Duration(milliseconds: (e.key.clamp(0, 8)) * 50),
+                      child: ReviewTile(review: e.value),
+                    ),
                   ),
                 ),
-              ),
         ],
       ),
     );

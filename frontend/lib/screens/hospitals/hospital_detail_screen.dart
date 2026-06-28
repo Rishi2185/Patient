@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../../data/mock_data.dart';
 import '../../models/hospital.dart';
+import '../../state/doctor_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/doctor_card.dart';
@@ -27,7 +28,7 @@ class HospitalDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final doctors = MockData.doctorsByHospital(hospital.id);
+    final doctors = context.watch<DoctorProvider>().byHospital(hospital.id);
 
     return Scaffold(
       body: CustomScrollView(

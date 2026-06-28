@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../data/mock_data.dart';
 import '../../models/specialty.dart';
 import '../../state/auth_provider.dart';
 import '../../state/doctor_provider.dart';
@@ -10,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/doctor_card.dart';
 import '../../widgets/fade_in.dart';
+import '../../widgets/load_error.dart';
 import '../../widgets/search_field.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/specialty_chip.dart';
@@ -38,8 +38,12 @@ class HomeScreen extends StatelessWidget {
     final user = context.watch<AuthProvider>().user;
     final doctorProvider = context.watch<DoctorProvider>();
     final topDoctors = doctorProvider.topRated;
-    final availableToday =
-        MockData.doctors.where((d) => d.availableToday).take(5).toList();
+    final availableToday = doctorProvider.availableToday;
+    final doctorsLoading = doctorProvider.loading && topDoctors.isEmpty;
+    final doctorsError = doctorProvider.error;
+    final showError = !doctorProvider.loading &&
+        doctorsError != null &&
+        topDoctors.isEmpty;
 
     return Scaffold(
       body: SafeArea(
@@ -91,83 +95,108 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            // Top doctors rail
-            FadeIn(
-              delay: const Duration(milliseconds: 240),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SectionHeader(
-                  title: 'Top doctors',
-                  actionLabel: 'See all',
-                  onAction: () => _openList(context),
+            if (doctorsLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 56),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (showError)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+                child: LoadError(
+                  message: doctorsError,
+                  onRetry: () =>
+                      context.read<DoctorProvider>().load(force: true),
+                ),
+              )
+            else ...[
+              // Top doctors rail
+              FadeIn(
+                delay: const Duration(milliseconds: 240),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: SectionHeader(
+                    title: 'Top doctors',
+                    actionLabel: 'See all',
+                    onAction: () => _openList(context),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 178,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: topDoctors.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 14),
-                itemBuilder: (_, i) {
-                  final d = topDoctors[i];
-                  return FadeIn(
-                    delay: Duration(milliseconds: 260 + i * 50),
-                    child: DoctorMiniCard(
-                      doctor: d,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => DoctorDetailScreen(doctor: d),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 178,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: topDoctors.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 14),
+                  itemBuilder: (_, i) {
+                    final d = topDoctors[i];
+                    return FadeIn(
+                      delay: Duration(milliseconds: 260 + i * 50),
+                      child: DoctorMiniCard(
+                        doctor: d,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => DoctorDetailScreen(doctor: d),
+                          ),
                         ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            // Available today
-            FadeIn(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SectionHeader(
-                  title: 'Available today',
-                  actionLabel: 'See all',
-                  onAction: () {
-                    final p = context.read<DoctorProvider>();
-                    p.clearFilters();
-                    p.setQuery('');
-                    p.setAvailableTodayOnly(true);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const DoctorListScreen(),
                       ),
                     );
                   },
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            ...availableToday.asMap().entries.map(
-                  (e) => Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                    child: FadeIn(
-                      delay: Duration(milliseconds: 80 + e.key * 60),
-                      child: DoctorCard(
-                        doctor: e.value,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                DoctorDetailScreen(doctor: e.value),
+              const SizedBox(height: 24),
+              // Available today
+              FadeIn(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: SectionHeader(
+                    title: 'Available today',
+                    actionLabel: 'See all',
+                    onAction: () {
+                      final p = context.read<DoctorProvider>();
+                      p.clearFilters();
+                      p.setQuery('');
+                      p.setAvailableTodayOnly(true);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const DoctorListScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (availableToday.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 14),
+                  child: Text(
+                    'No doctors are marked available today right now.',
+                    style: TextStyle(color: AppColors.textTertiary),
+                  ),
+                )
+              else
+                ...availableToday.asMap().entries.map(
+                      (e) => Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                        child: FadeIn(
+                          delay: Duration(milliseconds: 80 + e.key * 60),
+                          child: DoctorCard(
+                            doctor: e.value,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    DoctorDetailScreen(doctor: e.value),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
+            ],
           ],
         ),
       ),

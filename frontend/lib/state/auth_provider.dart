@@ -1,78 +1,45 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/api_exception.dart';
+import '../api/auth_api.dart';
 import '../models/app_user.dart';
+import 'services.dart';
 
-/// Handles sign-up, sign-in, OTP (simulated), session persistence and
-/// "remember me". All data is local — no backend.
+/// Handles the patient session against the backend: phone+password sign-in,
+/// OTP-gated sign-up and password reset, token persistence and sign-out.
+///
+/// All the action methods return `null` on success or a human-friendly error
+/// message on failure, matching how the auth screens already consume them.
 class AuthProvider extends ChangeNotifier {
-  static const _kUsers = 'registered_users';
-  static const _kSessionPhone = 'session_phone';
-
-  /// Fixed demo OTP used everywhere a code is requested.
-  static const String demoOtp = '1234';
+  final Services _services;
 
   AppUser? _user;
   AppUser? get user => _user;
   bool get isAuthenticated => _user != null;
 
-  // phone -> {username, password}
-  Map<String, Map<String, String>> _users = {};
+  /// The last dev OTP returned by the backend (non-production only). Shown as a
+  /// demo hint on the OTP screen so testers don't need a real SMS.
+  String? _lastDevCode;
+  String? get lastDevCode => _lastDevCode;
 
-  SharedPreferences? _prefs;
+  AuthProvider(this._services) {
+    _services.api.onUnauthorized = _onUnauthorized;
+  }
 
-  /// Load persisted accounts + restore a "remember me" session.
+  /// Restore a persisted session (token + cached user) on launch.
   Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-
-    final raw = _prefs!.getString(_kUsers);
-    if (raw != null) {
-      final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      _users = decoded.map(
-        (k, v) => MapEntry(k, Map<String, String>.from(v as Map)),
-      );
-    }
-
-    // Seed a ready-to-use demo account on first launch.
-    if (!_users.containsKey('9999999999')) {
-      _users['9999999999'] = {
-        'username': 'Demo Patient',
-        'password': 'demo1234',
-      };
-      await _persistUsers();
-    }
-
-    final sessionPhone = _prefs!.getString(_kSessionPhone);
-    if (sessionPhone != null && _users.containsKey(sessionPhone)) {
-      _user = AppUser(
-        username: _users[sessionPhone]!['username']!,
-        phone: sessionPhone,
-      );
+    final token = _services.settings.token;
+    final raw = _services.settings.sessionUserJson;
+    if (token == null || raw == null) return;
+    try {
+      _user = AppUser.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      _services.api.token = token;
+    } catch (_) {
+      await _services.settings.clearSession();
     }
     notifyListeners();
-  }
-
-  bool phoneExists(String phone) => _users.containsKey(phone);
-
-  Future<void> _persistUsers() async {
-    await _prefs?.setString(_kUsers, jsonEncode(_users));
-  }
-
-  /// Register a new account. Returns an error message, or null on success.
-  Future<String?> signUp({
-    required String username,
-    required String phone,
-    required String password,
-  }) async {
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    if (_users.containsKey(phone)) {
-      return 'An account with this number already exists.';
-    }
-    _users[phone] = {'username': username, 'password': password};
-    await _persistUsers();
-    return null;
   }
 
   /// Sign in with phone + password. Returns an error message, or null.
@@ -81,49 +48,125 @@ class AuthProvider extends ChangeNotifier {
     required String password,
     required bool rememberMe,
   }) async {
-    await Future<void>.delayed(const Duration(milliseconds: 700));
-    final record = _users[phone];
-    if (record == null) {
-      return 'No account found for this number.';
+    try {
+      final result = await _services.auth.login(phone, password);
+      await _applySession(result, persist: rememberMe);
+      return null;
+    } on ApiException catch (e) {
+      return _friendly(e, on401: 'Incorrect phone number or password.');
     }
-    if (record['password'] != password) {
-      return 'Incorrect password. Please try again.';
-    }
-    _user = AppUser(username: record['username']!, phone: phone);
-    if (rememberMe) {
-      await _prefs?.setString(_kSessionPhone, phone);
-    } else {
-      await _prefs?.remove(_kSessionPhone);
-    }
-    notifyListeners();
-    return null;
   }
 
-  /// Simulate sending an OTP to a phone number.
-  Future<void> sendOtp(String phone) async {
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    // In a real app this triggers an SMS. Here the code is always [demoOtp].
+  /// Request a sign-up OTP for a new number. The backend rejects numbers that
+  /// already have an account. Returns an error message, or null.
+  Future<String?> requestSignupOtp(String phone) =>
+      _requestOtp(phone, OtpPurpose.signup);
+
+  /// Request a password-reset OTP for an existing number. Returns an error, or
+  /// null.
+  Future<String?> requestResetOtp(String phone) =>
+      _requestOtp(phone, OtpPurpose.reset);
+
+  Future<String?> _requestOtp(String phone, String purpose) async {
+    try {
+      _lastDevCode = await _services.auth.requestOtp(
+        phone: phone,
+        purpose: purpose,
+      );
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return _friendly(e);
+    }
   }
 
-  bool verifyOtp(String code) => code.trim() == demoOtp;
+  /// Check a code against the backend (does not consume it). Returns an error
+  /// message when the code is wrong/expired, or null when valid.
+  Future<String?> verifyOtp({
+    required String phone,
+    required String purpose,
+    required String code,
+  }) async {
+    try {
+      final valid = await _services.auth.verifyOtp(
+        phone: phone,
+        purpose: purpose,
+        code: code,
+      );
+      return valid ? null : 'Incorrect or expired code. Please try again.';
+    } on ApiException catch (e) {
+      return _friendly(e);
+    }
+  }
 
-  /// Reset password for an existing account (after OTP).
+  /// Register a new account (with a verified OTP) and sign in. Returns an error
+  /// message, or null.
+  Future<String?> signUp({
+    required String username,
+    required String phone,
+    required String password,
+    required String otp,
+  }) async {
+    try {
+      final result = await _services.auth.signup(
+        username: username,
+        phone: phone,
+        password: password,
+        otp: otp,
+      );
+      await _applySession(result, persist: true);
+      return null;
+    } on ApiException catch (e) {
+      return _friendly(e);
+    }
+  }
+
+  /// Reset an existing account's password (with a verified OTP). Returns an
+  /// error message, or null.
   Future<String?> resetPassword({
     required String phone,
+    required String otp,
     required String newPassword,
   }) async {
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (!_users.containsKey(phone)) {
-      return 'No account found for this number.';
+    try {
+      await _services.auth.resetPassword(
+        phone: phone,
+        otp: otp,
+        newPassword: newPassword,
+      );
+      return null;
+    } on ApiException catch (e) {
+      return _friendly(e);
     }
-    _users[phone]!['password'] = newPassword;
-    await _persistUsers();
-    return null;
   }
 
   Future<void> signOut() async {
+    await _services.settings.clearSession();
+    _services.api.token = null;
     _user = null;
-    await _prefs?.remove(_kSessionPhone);
+    _lastDevCode = null;
     notifyListeners();
+  }
+
+  Future<void> _applySession(AuthResult result, {required bool persist}) async {
+    _user = result.user;
+    _services.api.token = result.token;
+    _lastDevCode = null;
+    if (persist) {
+      await _services.settings.setToken(result.token);
+      await _services.settings.setSessionUserJson(jsonEncode(result.user.toJson()));
+    }
+    notifyListeners();
+  }
+
+  void _onUnauthorized() {
+    // Session expired server-side — drop it so the UI returns to sign-in.
+    if (_user != null) signOut();
+  }
+
+  String _friendly(ApiException e, {String? on401}) {
+    if (e.isNetwork) return e.message;
+    if (e.status == 401 && on401 != null) return on401;
+    return e.message;
   }
 }

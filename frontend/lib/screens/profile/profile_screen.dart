@@ -36,6 +36,7 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
     if (confirm != true || !context.mounted) return;
+    context.read<AppointmentProvider>().clear();
     await context.read<AuthProvider>().signOut();
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

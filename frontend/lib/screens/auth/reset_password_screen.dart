@@ -10,8 +10,13 @@ import '../../widgets/primary_button.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   final String phone;
+  final String otp;
 
-  const ResetPasswordScreen({super.key, required this.phone});
+  const ResetPasswordScreen({
+    super.key,
+    required this.phone,
+    required this.otp,
+  });
 
   @override
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
@@ -43,6 +48,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     setState(() => _loading = true);
     final error = await context.read<AuthProvider>().resetPassword(
           phone: widget.phone,
+          otp: widget.otp,
           newPassword: _password.text,
         );
     if (!mounted) return;

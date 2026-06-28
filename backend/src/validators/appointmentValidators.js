@@ -30,6 +30,11 @@ const bookingSchema = z
     slotLabel: z.string().trim().min(1),
     fee: z.number().int().min(0).optional(),
     paymentMethod: paymentInt.optional(),
+    patientName: z.string().trim().optional(),
+    patientAge: z.number().int().min(0).max(130).optional(),
+    patientBloodGroup: z.string().trim().optional(),
+    patientType: z.enum(['ipd', 'opd']).optional(),
+    paymentStatus: z.string().trim().optional(),
   })
   .strip();
 

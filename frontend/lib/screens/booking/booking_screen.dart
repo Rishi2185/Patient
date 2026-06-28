@@ -11,7 +11,7 @@ import '../../utils/slot_generator.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/fade_in.dart';
 import '../../widgets/primary_button.dart';
-import 'payment_screen.dart';
+import 'patient_details_screen.dart';
 
 class BookingScreen extends StatefulWidget {
   final Doctor doctor;
@@ -154,7 +154,7 @@ class _BookingScreenState extends State<BookingScreen> {
         onProceed: () {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => PaymentScreen(
+              builder: (_) => PatientDetailsScreen(
                 doctor: doctor,
                 date: date,
                 slot: _selectedSlot!,

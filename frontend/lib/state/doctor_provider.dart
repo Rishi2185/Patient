@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 
-import '../data/mock_data.dart';
+import '../api/api_exception.dart';
 import '../models/doctor.dart';
+import 'services.dart';
 
 enum DoctorSort { relevance, ratingHigh, feeLow, feeHigh, experience }
 
@@ -22,9 +23,22 @@ extension DoctorSortX on DoctorSort {
   }
 }
 
-/// Holds discovery state: search query, specialty filter, availability filter
-/// and sort order. Computes the filtered + sorted doctor list.
+/// Loads the doctor roster from the backend once, then holds the discovery
+/// state (search query, specialty filter, availability filter and sort order)
+/// and computes the filtered + sorted list client-side.
 class DoctorProvider extends ChangeNotifier {
+  final Services _services;
+  DoctorProvider(this._services);
+
+  final List<Doctor> _all = [];
+  bool _loading = false;
+  bool _loaded = false;
+  String? _error;
+
+  bool get loading => _loading;
+  bool get loaded => _loaded;
+  String? get error => _error;
+
   String _query = '';
   String? _specialtyId; // null = all
   bool _availableTodayOnly = false;
@@ -42,6 +56,26 @@ class DoctorProvider extends ChangeNotifier {
       _availableTodayOnly ||
       _minRating > 0 ||
       _sort != DoctorSort.relevance;
+
+  /// Fetch the full roster from the backend (cached after the first success).
+  Future<void> load({bool force = false}) async {
+    if (_loading || (_loaded && !force)) return;
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final page = await _services.doctors.list(limit: 100, sort: 'relevance');
+      _all
+        ..clear()
+        ..addAll(page.data);
+      _loaded = true;
+    } on ApiException catch (e) {
+      _error = e.message;
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
 
   void setQuery(String value) {
     _query = value;
@@ -77,7 +111,7 @@ class DoctorProvider extends ChangeNotifier {
   }
 
   List<Doctor> get doctors {
-    var list = [...MockData.doctors];
+    var list = [..._all];
 
     if (_query.trim().isNotEmpty) {
       final q = _query.toLowerCase();
@@ -103,8 +137,6 @@ class DoctorProvider extends ChangeNotifier {
 
     switch (_sort) {
       case DoctorSort.relevance:
-        list.sort((a, b) => b.rating.compareTo(a.rating));
-        break;
       case DoctorSort.ratingHigh:
         list.sort((a, b) => b.rating.compareTo(a.rating));
         break;
@@ -122,10 +154,25 @@ class DoctorProvider extends ChangeNotifier {
     return list;
   }
 
-  /// Top-rated doctors for the home "Top Doctors" rail.
+  /// Top-rated doctors for the home "Top doctors" rail.
   List<Doctor> get topRated {
-    final list = [...MockData.doctors]
-      ..sort((a, b) => b.rating.compareTo(a.rating));
+    final list = [..._all]..sort((a, b) => b.rating.compareTo(a.rating));
     return list.take(6).toList();
   }
+
+  /// Doctors available today, for the home "Available today" section.
+  List<Doctor> get availableToday =>
+      _all.where((d) => d.availableToday).take(5).toList();
+
+  /// Lookup a loaded doctor by id (null if not in the roster).
+  Doctor? byId(String id) {
+    for (final d in _all) {
+      if (d.id == id) return d;
+    }
+    return null;
+  }
+
+  /// Doctors affiliated with a given hospital.
+  List<Doctor> byHospital(String hospitalId) =>
+      _all.where((d) => d.hospitalId == hospitalId).toList();
 }

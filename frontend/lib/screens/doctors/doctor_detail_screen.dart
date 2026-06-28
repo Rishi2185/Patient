@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../data/mock_data.dart';
 import '../../models/doctor.dart';
+import '../../state/hospital_provider.dart';
 import '../../state/review_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
@@ -17,18 +17,34 @@ import '../booking/booking_screen.dart';
 import '../hospitals/hospital_detail_screen.dart';
 import '../reviews/doctor_reviews_screen.dart';
 
-class DoctorDetailScreen extends StatelessWidget {
+class DoctorDetailScreen extends StatefulWidget {
   final Doctor doctor;
 
   const DoctorDetailScreen({super.key, required this.doctor});
 
   @override
+  State<DoctorDetailScreen> createState() => _DoctorDetailScreenState();
+}
+
+class _DoctorDetailScreenState extends State<DoctorDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<ReviewProvider>().loadForDoctor(widget.doctor.id);
+      context.read<HospitalProvider>().load(); // no-op if already loaded
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final doctor = widget.doctor;
     final reviewProvider = context.watch<ReviewProvider>();
     final reviews = reviewProvider.reviewsForDoctor(doctor.id);
     final aggRating = reviewProvider.aggregateRating(doctor);
     final aggCount = reviewProvider.aggregateCount(doctor);
-    final hospital = MockData.hospitalById(doctor.hospitalId);
+    final hospital = context.watch<HospitalProvider>().byId(doctor.hospitalId);
 
     return Scaffold(
       body: CustomScrollView(
@@ -100,30 +116,47 @@ class DoctorDetailScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 22),
                   // Hospital
-                  FadeIn(
-                    delay: const Duration(milliseconds: 260),
-                    child: const _Heading('Hospital'),
-                  ),
-                  const SizedBox(height: 12),
-                  FadeIn(
-                    delay: const Duration(milliseconds: 300),
-                    child: GestureDetector(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              HospitalDetailScreen(hospital: hospital),
+                  if (hospital != null) ...[
+                    FadeIn(
+                      delay: const Duration(milliseconds: 260),
+                      child: const _Heading('Hospital'),
+                    ),
+                    const SizedBox(height: 12),
+                    FadeIn(
+                      delay: const Duration(milliseconds: 300),
+                      child: GestureDetector(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                HospitalDetailScreen(hospital: hospital),
+                          ),
+                        ),
+                        child: _InfoCard(
+                          icon: Icons.local_hospital_rounded,
+                          title: hospital.name,
+                          subtitle: '${hospital.address}, ${hospital.city}',
+                          trailing: const Icon(Icons.chevron_right_rounded,
+                              color: AppColors.textTertiary),
                         ),
                       ),
+                    ),
+                    const SizedBox(height: 24),
+                  ] else if (doctor.hospitalName.isNotEmpty) ...[
+                    FadeIn(
+                      delay: const Duration(milliseconds: 260),
+                      child: const _Heading('Hospital'),
+                    ),
+                    const SizedBox(height: 12),
+                    FadeIn(
+                      delay: const Duration(milliseconds: 300),
                       child: _InfoCard(
                         icon: Icons.local_hospital_rounded,
-                        title: hospital.name,
-                        subtitle: '${hospital.address}, ${hospital.city}',
-                        trailing: const Icon(Icons.chevron_right_rounded,
-                            color: AppColors.textTertiary),
+                        title: doctor.hospitalName,
+                        subtitle: 'Affiliated hospital',
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
+                    const SizedBox(height: 24),
+                  ],
                   // Reviews
                   FadeIn(
                     delay: const Duration(milliseconds: 340),

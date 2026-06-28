@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../data/mock_data.dart';
+import '../../api/api_exception.dart';
 import '../../models/appointment.dart';
 import '../../state/appointment_provider.dart';
+import '../../state/doctor_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
@@ -40,31 +41,37 @@ class MyAppointmentsScreen extends StatelessWidget {
           ),
         ),
         body: Consumer<AppointmentProvider>(
-          builder: (_, provider, __) => TabBarView(
-            children: [
-              _AppointmentList(
-                items: provider.upcoming,
-                status: AppointmentStatus.upcoming,
-                emptyTitle: 'No upcoming visits',
-                emptyMessage:
-                    'Book an appointment with a doctor and it will show up '
-                    'here.',
-              ),
-              _AppointmentList(
-                items: provider.completed,
-                status: AppointmentStatus.completed,
-                emptyTitle: 'Nothing completed yet',
-                emptyMessage:
-                    'Your past consultations will appear here once visited.',
-              ),
-              _AppointmentList(
-                items: provider.cancelled,
-                status: AppointmentStatus.cancelled,
-                emptyTitle: 'No cancellations',
-                emptyMessage: 'Appointments you cancel will be listed here.',
-              ),
-            ],
-          ),
+          builder: (_, provider, __) {
+            final loading = provider.loading && provider.count == 0;
+            return TabBarView(
+              children: [
+                _AppointmentList(
+                  items: provider.upcoming,
+                  status: AppointmentStatus.upcoming,
+                  loading: loading,
+                  emptyTitle: 'No upcoming visits',
+                  emptyMessage:
+                      'Book an appointment with a doctor and it will show up '
+                      'here.',
+                ),
+                _AppointmentList(
+                  items: provider.completed,
+                  status: AppointmentStatus.completed,
+                  loading: loading,
+                  emptyTitle: 'Nothing completed yet',
+                  emptyMessage:
+                      'Your past consultations will appear here once visited.',
+                ),
+                _AppointmentList(
+                  items: provider.cancelled,
+                  status: AppointmentStatus.cancelled,
+                  loading: loading,
+                  emptyTitle: 'No cancellations',
+                  emptyMessage: 'Appointments you cancel will be listed here.',
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -74,18 +81,23 @@ class MyAppointmentsScreen extends StatelessWidget {
 class _AppointmentList extends StatelessWidget {
   final List<Appointment> items;
   final AppointmentStatus status;
+  final bool loading;
   final String emptyTitle;
   final String emptyMessage;
 
   const _AppointmentList({
     required this.items,
     required this.status,
+    required this.loading,
     required this.emptyTitle,
     required this.emptyMessage,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (loading && items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (items.isEmpty) {
       return EmptyState(
         icon: Icons.event_note_rounded,
@@ -134,14 +146,31 @@ class _AppointmentCard extends StatelessWidget {
   }
 
   void _openDoctor(BuildContext context) {
-    final matches =
-        MockData.doctors.where((d) => d.id == appointment.doctorId);
-    if (matches.isEmpty) return;
+    final doctor =
+        context.read<DoctorProvider>().byId(appointment.doctorId);
+    if (doctor == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Still loading doctor — please retry.')),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => DoctorDetailScreen(doctor: matches.first),
+        builder: (_) => DoctorDetailScreen(doctor: doctor),
       ),
     );
+  }
+
+  Future<void> _markVisited(BuildContext context) async {
+    try {
+      await context
+          .read<AppointmentProvider>()
+          .markCompleted(appointment.id);
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   Future<void> _cancel(BuildContext context) async {
@@ -170,7 +199,13 @@ class _AppointmentCard extends StatelessWidget {
       ),
     );
     if (confirm == true && context.mounted) {
-      await context.read<AppointmentProvider>().cancel(appointment.id);
+      try {
+        await context.read<AppointmentProvider>().cancel(appointment.id);
+      } on ApiException catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -284,9 +319,7 @@ class _AppointmentCard extends StatelessWidget {
               child: _FilledAction(
                 label: 'Mark visited',
                 icon: Icons.check_circle_outline_rounded,
-                onTap: () => context
-                    .read<AppointmentProvider>()
-                    .markCompleted(appointment.id),
+                onTap: () => _markVisited(context),
               ),
             ),
           ],

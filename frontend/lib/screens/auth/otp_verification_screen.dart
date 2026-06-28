@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/auth_api.dart';
 import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
@@ -10,19 +11,25 @@ import '../../widgets/fade_in.dart';
 import '../../widgets/otp_input.dart';
 import '../../widgets/primary_button.dart';
 
-/// Generic OTP verification screen. On a correct code it runs [onVerified],
-/// which performs the next step (registration, reset, etc.).
+/// Generic OTP verification screen. It verifies the entered code against the
+/// backend (for the given [purpose]) and, on success, runs [onVerified] with the
+/// code so the caller can complete sign-up / password reset.
 class OtpVerificationScreen extends StatefulWidget {
   final String phone;
+
+  /// [OtpPurpose.signup] or [OtpPurpose.reset].
+  final String purpose;
   final String title;
   final String subtitle;
 
-  /// Returns an optional error message; null = success.
-  final Future<String?> Function() onVerified;
+  /// Runs the next step with the verified code. Returns an optional error
+  /// message; null = success.
+  final Future<String?> Function(String code) onVerified;
 
   const OtpVerificationScreen({
     super.key,
     required this.phone,
+    required this.purpose,
     required this.onVerified,
     this.title = 'Verify your number',
     this.subtitle = 'Enter the 4-digit code we sent to',
@@ -64,38 +71,62 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   Future<void> _verify() async {
-    final auth = context.read<AuthProvider>();
-    if (!auth.verifyOtp(_code)) {
-      setState(() => _error = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Incorrect code. Try the demo OTP 1234.')),
-      );
-      return;
-    }
+    if (_code.length != 4) return;
     setState(() {
       _loading = true;
       _error = false;
     });
-    final error = await widget.onVerified();
+    final auth = context.read<AuthProvider>();
+
+    // First confirm the code with the backend (does not consume it).
+    final verifyError = await auth.verifyOtp(
+      phone: widget.phone,
+      purpose: widget.purpose,
+      code: _code,
+    );
+    if (!mounted) return;
+    if (verifyError != null) {
+      setState(() {
+        _loading = false;
+        _error = true;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(verifyError)));
+      return;
+    }
+
+    // Code is valid — run the caller's next step (signup / reset) with it.
+    final error = await widget.onVerified(_code);
     if (!mounted) return;
     setState(() => _loading = false);
     if (error != null) {
+      setState(() => _error = true);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(error)));
     }
   }
 
   Future<void> _resend() async {
-    await context.read<AuthProvider>().sendOtp(widget.phone);
-    _startTimer();
+    final auth = context.read<AuthProvider>();
+    final error = widget.purpose == OtpPurpose.reset
+        ? await auth.requestResetOtp(widget.phone)
+        : await auth.requestSignupOtp(widget.phone);
     if (!mounted) return;
+    _startTimer();
+    final devCode = auth.lastDevCode;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('A new code has been sent (demo: 1234).')),
+      SnackBar(
+        content: Text(error ??
+            (devCode != null
+                ? 'A new code has been sent (demo: $devCode).'
+                : 'A new code has been sent.')),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final devCode = context.watch<AuthProvider>().lastDevCode;
     return Scaffold(
       appBar: AppBar(),
       body: SafeArea(
@@ -157,28 +188,30 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   onCompleted: (_) => _verify(),
                 ),
               ),
-              const SizedBox(height: 16),
-              FadeIn(
-                delay: const Duration(milliseconds: 240),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.softGreenTint,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'Demo OTP is 1234',
-                      style: TextStyle(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+              if (devCode != null) ...[
+                const SizedBox(height: 16),
+                FadeIn(
+                  delay: const Duration(milliseconds: 240),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.softGreenTint,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'Demo code: $devCode',
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+              ],
               const SizedBox(height: 28),
               FadeIn(
                 delay: const Duration(milliseconds: 300),

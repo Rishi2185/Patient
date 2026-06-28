@@ -42,6 +42,11 @@ class Appointment {
   final String slotLabel; // e.g. "10:30 AM"
   final int fee;
   final PaymentMethod paymentMethod;
+  final String? patientName;
+  final int? patientAge;
+  final String? patientBloodGroup;
+  final String? patientType;
+  final String? paymentStatus;
   AppointmentStatus status;
   bool reviewed;
 
@@ -58,6 +63,11 @@ class Appointment {
     required this.paymentMethod,
     this.status = AppointmentStatus.upcoming,
     this.reviewed = false,
+    this.patientName,
+    this.patientAge,
+    this.patientBloodGroup,
+    this.patientType,
+    this.paymentStatus,
   });
 
   Map<String, dynamic> toJson() => {
@@ -73,20 +83,32 @@ class Appointment {
         'paymentMethod': paymentMethod.index,
         'status': status.index,
         'reviewed': reviewed,
+        'patientName': patientName,
+        'patientAge': patientAge,
+        'patientBloodGroup': patientBloodGroup,
+        'patientType': patientType,
+        'paymentStatus': paymentStatus,
       };
 
   factory Appointment.fromJson(Map<String, dynamic> json) => Appointment(
-        id: json['id'] as String,
-        doctorId: json['doctorId'] as String,
-        doctorName: json['doctorName'] as String,
-        doctorPhotoUrl: json['doctorPhotoUrl'] as String,
-        specialtyName: json['specialtyName'] as String,
-        hospitalName: json['hospitalName'] as String,
+        id: (json['id'] ?? json['_id'] ?? '') as String,
+        doctorId: (json['doctorId'] ?? '') as String,
+        doctorName: (json['doctorName'] ?? '') as String,
+        doctorPhotoUrl: (json['doctorPhotoUrl'] ?? '') as String,
+        specialtyName: (json['specialtyName'] ?? '') as String,
+        hospitalName: (json['hospitalName'] ?? '') as String,
         dateTime: DateTime.parse(json['dateTime'] as String),
-        slotLabel: json['slotLabel'] as String,
-        fee: json['fee'] as int,
-        paymentMethod: PaymentMethod.values[json['paymentMethod'] as int],
-        status: AppointmentStatus.values[json['status'] as int],
+        slotLabel: (json['slotLabel'] ?? '') as String,
+        fee: ((json['fee'] ?? 0) as num).toInt(),
+        paymentMethod: PaymentMethod
+            .values[((json['paymentMethod'] ?? 1) as int).clamp(0, 2)],
+        status:
+            AppointmentStatus.values[((json['status'] ?? 0) as int).clamp(0, 2)],
         reviewed: json['reviewed'] as bool? ?? false,
+        patientName: json['patientName'] as String?,
+        patientAge: json['patientAge'] as int?,
+        patientBloodGroup: json['patientBloodGroup'] as String?,
+        patientType: json['patientType'] as String?,
+        paymentStatus: json['paymentStatus'] as String?,
       );
 }

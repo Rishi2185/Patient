@@ -33,6 +33,31 @@ class Hospital {
     required this.latitude,
     required this.longitude,
   });
+
+  factory Hospital.fromJson(Map<String, dynamic> json) => Hospital(
+        id: (json['id'] ?? json['_id'] ?? '') as String,
+        name: (json['name'] ?? '') as String,
+        address: (json['address'] ?? '') as String,
+        city: (json['city'] ?? '') as String,
+        rating: ((json['rating'] ?? 0) as num).toDouble(),
+        phone: (json['phone'] ?? '') as String,
+        imageUrl: (json['imageUrl'] ?? '') as String,
+        galleryUrls:
+            (json['galleryUrls'] as List?)?.map((e) => e as String).toList() ??
+                const [],
+        departments:
+            (json['departments'] as List?)?.map((e) => e as String).toList() ??
+                const [],
+        facilities: (json['facilities'] as List?)
+                ?.map((e) => HospitalFacility.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        about: (json['about'] ?? '') as String,
+        openHours: (json['openHours'] ?? '') as String,
+        distanceKm: ((json['distanceKm'] ?? 0) as num).toDouble(),
+        latitude: ((json['latitude'] ?? 0) as num).toDouble(),
+        longitude: ((json['longitude'] ?? 0) as num).toDouble(),
+      );
 }
 
 /// A facility/amenity offered at a hospital, with an icon label.
@@ -41,4 +66,10 @@ class HospitalFacility {
   final String icon; // material icon code point key, resolved in widget
 
   const HospitalFacility(this.label, this.icon);
+
+  factory HospitalFacility.fromJson(Map<String, dynamic> json) =>
+      HospitalFacility(
+        (json['label'] ?? '') as String,
+        (json['icon'] ?? '') as String,
+      );
 }

@@ -1,56 +1,81 @@
 import 'package:flutter/foundation.dart';
 
-import '../data/mock_data.dart';
+import '../api/api_exception.dart';
 import '../models/doctor.dart';
 import '../models/review.dart';
+import 'services.dart';
 
-/// Holds reviews (seeded + patient-added) and computes aggregate ratings.
+/// Loads a doctor's reviews from the backend and caches them per doctor, along
+/// with the server's headline aggregate `{ rating, count }`. Also submits new
+/// reviews (auth required).
 class ReviewProvider extends ChangeNotifier {
-  final List<Review> _added = [];
-  int _seq = 1000;
+  final Services _services;
+  ReviewProvider(this._services);
 
+  final Map<String, List<Review>> _byDoctor = {};
+  final Map<String, double> _aggRating = {};
+  final Map<String, int> _aggCount = {};
+  final Set<String> _loading = {};
+
+  bool isLoading(String doctorId) => _loading.contains(doctorId);
+
+  /// Fetch reviews + aggregate for a doctor (cached after the first success).
+  Future<void> loadForDoctor(String doctorId, {bool force = false}) async {
+    if (_loading.contains(doctorId)) return;
+    if (_byDoctor.containsKey(doctorId) && !force) return;
+    _loading.add(doctorId);
+    notifyListeners();
+    try {
+      final page = await _services.reviews.forDoctor(doctorId);
+      _byDoctor[doctorId] = page.reviews;
+      _aggRating[doctorId] = page.aggregateRating;
+      _aggCount[doctorId] = page.aggregateCount;
+    } on ApiException {
+      _byDoctor.putIfAbsent(doctorId, () => const []);
+    } finally {
+      _loading.remove(doctorId);
+      notifyListeners();
+    }
+  }
+
+  /// Cached reviews for a doctor (newest first), or empty if not loaded yet.
   List<Review> reviewsForDoctor(String doctorId) {
-    final list = [
-      ..._added.where((r) => r.doctorId == doctorId),
-      ...MockData.reviewsForDoctor(doctorId),
-    ];
+    final list = [...(_byDoctor[doctorId] ?? const <Review>[])];
     list.sort((a, b) => b.date.compareTo(a.date));
     return list;
   }
 
-  void addReview({
+  /// Headline rating: the server aggregate when loaded, else the doctor's own.
+  double aggregateRating(Doctor doctor) =>
+      _aggRating[doctor.id] ?? doctor.rating;
+
+  /// Headline review count: the server aggregate when loaded, else the doctor's.
+  int aggregateCount(Doctor doctor) =>
+      _aggCount[doctor.id] ?? doctor.reviewCount;
+
+  /// Submit a review for a visited appointment. Returns an error message, or
+  /// null on success. Updates the cache + aggregate optimistically.
+  Future<String?> submitReview({
     required String doctorId,
-    required String patientName,
-    required double rating,
+    required int rating,
     required String comment,
-    required DateTime date,
-  }) {
-    _added.add(
-      Review(
-        id: 'ur${_seq++}',
+    String? appointmentId,
+  }) async {
+    try {
+      final result = await _services.reviews.create(
         doctorId: doctorId,
-        patientName: patientName,
         rating: rating,
         comment: comment,
-        date: date,
-      ),
-    );
-    notifyListeners();
-  }
-
-  /// Aggregate rating that blends the doctor's seed rating with any new
-  /// patient reviews added during the session.
-  double aggregateRating(Doctor doctor) {
-    final added = _added.where((r) => r.doctorId == doctor.id).toList();
-    if (added.isEmpty) return doctor.rating;
-    final baseTotal = doctor.rating * doctor.reviewCount;
-    final addedTotal = added.fold<double>(0, (sum, r) => sum + r.rating);
-    final count = doctor.reviewCount + added.length;
-    return (baseTotal + addedTotal) / count;
-  }
-
-  int aggregateCount(Doctor doctor) {
-    final added = _added.where((r) => r.doctorId == doctor.id).length;
-    return doctor.reviewCount + added;
+        appointmentId: appointmentId,
+      );
+      final existing = _byDoctor[doctorId] ?? const <Review>[];
+      _byDoctor[doctorId] = [...result.reviews, ...existing];
+      _aggRating[doctorId] = result.aggregateRating;
+      _aggCount[doctorId] = result.aggregateCount;
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    }
   }
 }

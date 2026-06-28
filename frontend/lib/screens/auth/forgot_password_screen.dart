@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/auth_api.dart';
 import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
@@ -36,27 +37,29 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     if (err != null) return;
 
     final auth = context.read<AuthProvider>();
-    if (!auth.phoneExists(_phone.text.trim())) {
-      setState(() => _error = 'No account found for this number.');
+    final phone = _phone.text.trim();
+
+    setState(() => _loading = true);
+    // Requesting a reset OTP also confirms the account exists server-side.
+    final otpError = await auth.requestResetOtp(phone);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (otpError != null) {
+      setState(() => _error = otpError);
       return;
     }
 
-    setState(() => _loading = true);
-    await auth.sendOtp(_phone.text.trim());
-    if (!mounted) return;
-    setState(() => _loading = false);
-
-    final phone = _phone.text.trim();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OtpVerificationScreen(
           phone: phone,
+          purpose: OtpPurpose.reset,
           title: 'Verify it’s you',
-          onVerified: () async {
+          onVerified: (code) async {
             if (!mounted) return null;
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
-                builder: (_) => ResetPasswordScreen(phone: phone),
+                builder: (_) => ResetPasswordScreen(phone: phone, otp: code),
               ),
             );
             return null;

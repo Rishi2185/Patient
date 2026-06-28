@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/api_exception.dart';
 import '../../models/appointment.dart';
 import '../../models/doctor.dart';
-import '../../data/mock_data.dart';
 import '../../state/appointment_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
@@ -18,12 +18,20 @@ class PaymentScreen extends StatefulWidget {
   final Doctor doctor;
   final DateTime date;
   final String slot;
+  final String patientName;
+  final int patientAge;
+  final String patientBloodGroup;
+  final String patientType;
 
   const PaymentScreen({
     super.key,
     required this.doctor,
     required this.date,
     required this.slot,
+    required this.patientName,
+    required this.patientAge,
+    required this.patientBloodGroup,
+    required this.patientType,
   });
 
   @override
@@ -40,30 +48,40 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _pay() async {
     setState(() => _processing = true);
+    // Simulated payment, then persist the booking on the backend.
     await Future<void>.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
 
-    final hospital = MockData.hospitalById(widget.doctor.hospitalId);
-    final appt = Appointment(
-      id: 'apt_${DateTime.now().microsecondsSinceEpoch}',
-      doctorId: widget.doctor.id,
-      doctorName: widget.doctor.name,
-      doctorPhotoUrl: widget.doctor.photoUrl,
-      specialtyName: widget.doctor.specialty.name,
-      hospitalName: hospital.name,
-      dateTime: SlotGenerator.toDateTime(widget.date, widget.slot),
-      slotLabel: widget.slot,
-      fee: _total,
-      paymentMethod: _method,
-    );
-    await context.read<AppointmentProvider>().book(appt);
-    if (!mounted) return;
-
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => ConfirmationScreen(appointment: appt),
-      ),
-    );
+    try {
+      final appt = await context.read<AppointmentProvider>().book(
+            doctorId: widget.doctor.id,
+            dateTime: SlotGenerator.toDateTime(widget.date, widget.slot),
+            slotLabel: widget.slot,
+            fee: _total,
+            paymentMethod: _method,
+            patientName: widget.patientName,
+            patientAge: widget.patientAge,
+            patientBloodGroup: widget.patientBloodGroup,
+            patientType: widget.patientType,
+            paymentStatus: 'completed',
+          );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => ConfirmationScreen(appointment: appt),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _processing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.isConflict
+              ? 'Sorry, that slot was just booked. Please pick another.'
+              : e.message),
+        ),
+      );
+    }
   }
 
   @override
@@ -151,6 +169,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const SizedBox(height: 10),
           _row('Date & time',
               Fmt.dateWithSlot(widget.date, widget.slot)),
+          const SizedBox(height: 10),
+          _row('Patient Name', widget.patientName),
+          const SizedBox(height: 10),
+          _row('Age & Blood', '${widget.patientAge} yrs  ·  ${widget.patientBloodGroup}'),
+          const SizedBox(height: 10),
+          _row('Type', widget.patientType.toUpperCase()),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 14),
             child: Divider(),

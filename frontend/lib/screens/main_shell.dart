@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../state/appointment_provider.dart';
+import '../state/doctor_provider.dart';
+import '../state/hospital_provider.dart';
 import '../theme/app_colors.dart';
 import 'appointments/my_appointments_screen.dart';
 import 'home/home_screen.dart';
@@ -29,6 +33,19 @@ class MainShellState extends State<MainShell> {
     HospitalListScreen(),
     ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Warm the caches once the patient is in the app. Each load() is a no-op if
+    // already loaded, so tab switches don't refetch.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<DoctorProvider>().load();
+      context.read<HospitalProvider>().load();
+      context.read<AppointmentProvider>().load();
+    });
+  }
 
   void goTo(int index) => setState(() => _index = index);
 

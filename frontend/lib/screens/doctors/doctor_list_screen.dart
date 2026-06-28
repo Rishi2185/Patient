@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/doctor_card.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/fade_in.dart';
+import '../../widgets/load_error.dart';
 import '../../widgets/search_field.dart';
 import '../../widgets/specialty_chip.dart';
 import 'doctor_detail_screen.dart';
@@ -30,9 +31,11 @@ class _DoctorListScreenState extends State<DoctorListScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.autofocusSearch) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<DoctorProvider>().load(); // no-op if already loaded
+      if (widget.autofocusSearch) _focus.requestFocus();
+    });
   }
 
   @override
@@ -125,24 +128,34 @@ class _DoctorListScreenState extends State<DoctorListScreen> {
             ),
           ),
           Expanded(
-            child: doctors.isEmpty
-                ? EmptyState(
-                    icon: Icons.search_off_rounded,
-                    title: 'No doctors found',
-                    message:
-                        'Try a different speciality or clear your filters to '
-                        'see more results.',
-                    action: TextButton.icon(
-                      onPressed: () {
-                        provider.clearFilters();
-                        _search.clear();
-                        provider.setQuery('');
-                      },
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Clear filters'),
-                    ),
-                  )
-                : ListView.separated(
+            child: provider.loading && !provider.loaded
+                ? const Center(child: CircularProgressIndicator())
+                : (provider.error != null && !provider.loaded)
+                    ? Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: LoadError(
+                          message: provider.error!,
+                          onRetry: () => provider.load(force: true),
+                        ),
+                      )
+                    : doctors.isEmpty
+                        ? EmptyState(
+                            icon: Icons.search_off_rounded,
+                            title: 'No doctors found',
+                            message:
+                                'Try a different speciality or clear your '
+                                'filters to see more results.',
+                            action: TextButton.icon(
+                              onPressed: () {
+                                provider.clearFilters();
+                                _search.clear();
+                                provider.setQuery('');
+                              },
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Clear filters'),
+                            ),
+                          )
+                        : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                     itemCount: doctors.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 14),

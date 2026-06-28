@@ -1,19 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../../data/mock_data.dart';
 import '../../models/hospital.dart';
+import '../../state/doctor_provider.dart';
+import '../../state/hospital_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/fade_in.dart';
+import '../../widgets/load_error.dart';
 import '../../widgets/network_image_box.dart';
 import 'hospital_detail_screen.dart';
 
-class HospitalListScreen extends StatelessWidget {
+class HospitalListScreen extends StatefulWidget {
   const HospitalListScreen({super.key});
 
   @override
+  State<HospitalListScreen> createState() => _HospitalListScreenState();
+}
+
+class _HospitalListScreenState extends State<HospitalListScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<HospitalProvider>().load(); // no-op if already loaded
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hospitals = MockData.hospitals;
+    final provider = context.watch<HospitalProvider>();
+    final hospitals = provider.hospitals;
 
     return Scaffold(
       body: SafeArea(
@@ -21,25 +39,42 @@ class HospitalListScreen extends StatelessWidget {
         child: CustomScrollView(
           slivers: [
             const SliverToBoxAdapter(child: _Header()),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              sliver: SliverList.separated(
-                itemCount: hospitals.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 16),
-                itemBuilder: (_, i) => FadeIn(
-                  delay: Duration(milliseconds: i * 70),
-                  child: HospitalCard(
-                    hospital: hospitals[i],
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            HospitalDetailScreen(hospital: hospitals[i]),
+            if (provider.loading && hospitals.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (provider.error != null && hospitals.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: LoadError(
+                    message: provider.error!,
+                    onRetry: () => provider.load(force: true),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                sliver: SliverList.separated(
+                  itemCount: hospitals.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  itemBuilder: (_, i) => FadeIn(
+                    delay: Duration(milliseconds: i * 70),
+                    child: HospitalCard(
+                      hospital: hospitals[i],
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              HospitalDetailScreen(hospital: hospitals[i]),
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -187,7 +222,7 @@ class HospitalCard extends StatelessWidget {
                       ),
                       const Spacer(),
                       Text(
-                        '${MockData.doctorsByHospital(hospital.id).length} doctors',
+                        '${context.watch<DoctorProvider>().byHospital(hospital.id).length} doctors',
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

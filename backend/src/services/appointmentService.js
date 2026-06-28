@@ -64,8 +64,12 @@ async function create(payload, patient) {
     status: APPOINTMENT_STATUS.UPCOMING,
     reviewed: false,
     patientId: patient.id,
-    patientName: patient.name,
+    patientName: payload.patientName || patient.name,
     patientPhone: patient.phone,
+    patientAge: payload.patientAge,
+    patientBloodGroup: payload.patientBloodGroup,
+    patientType: payload.patientType,
+    paymentStatus: payload.paymentStatus || 'completed',
     source: APPOINTMENT_SOURCE.PATIENT_APP,
     dayKey: key,
   };

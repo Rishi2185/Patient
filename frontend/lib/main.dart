@@ -6,7 +6,10 @@ import 'screens/splash_screen.dart';
 import 'state/appointment_provider.dart';
 import 'state/auth_provider.dart';
 import 'state/doctor_provider.dart';
+import 'state/hospital_provider.dart';
 import 'state/review_provider.dart';
+import 'state/services.dart';
+import 'state/settings_store.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -18,31 +21,37 @@ Future<void> main() async {
     ),
   );
 
-  final auth = AuthProvider();
-  final appointments = AppointmentProvider();
-  await Future.wait([auth.init(), appointments.init()]);
+  // Load persisted settings, wire the API client + services, then restore any
+  // saved session before the first frame.
+  final settings = await SettingsStore.load();
+  final services = Services.wire(settings: settings);
 
-  runApp(AarvyApp(auth: auth, appointments: appointments));
+  final auth = AuthProvider(services);
+  await auth.init();
+
+  runApp(AarvyApp(services: services, auth: auth));
 }
 
 class AarvyApp extends StatelessWidget {
+  final Services services;
   final AuthProvider auth;
-  final AppointmentProvider appointments;
 
   const AarvyApp({
     super.key,
+    required this.services,
     required this.auth,
-    required this.appointments,
   });
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: auth),
-        ChangeNotifierProvider.value(value: appointments),
-        ChangeNotifierProvider(create: (_) => DoctorProvider()),
-        ChangeNotifierProvider(create: (_) => ReviewProvider()),
+        Provider<Services>.value(value: services),
+        ChangeNotifierProvider<AuthProvider>.value(value: auth),
+        ChangeNotifierProvider(create: (_) => AppointmentProvider(services)),
+        ChangeNotifierProvider(create: (_) => DoctorProvider(services)),
+        ChangeNotifierProvider(create: (_) => HospitalProvider(services)),
+        ChangeNotifierProvider(create: (_) => ReviewProvider(services)),
       ],
       child: MaterialApp(
         title: 'Aarvy',

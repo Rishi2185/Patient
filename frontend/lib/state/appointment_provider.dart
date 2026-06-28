@@ -1,16 +1,22 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/api_exception.dart';
 import '../models/appointment.dart';
+import 'services.dart';
 
-/// Stores the patient's appointments. Persisted locally as JSON.
+/// The signed-in patient's appointments, backed by the cloud API
+/// (`/appointments`). Booking, cancelling and completing all round-trip to the
+/// server; the local list mirrors the latest known state.
 class AppointmentProvider extends ChangeNotifier {
-  static const _kAppointments = 'appointments';
+  final Services _services;
+  AppointmentProvider(this._services);
 
   final List<Appointment> _appointments = [];
-  SharedPreferences? _prefs;
+  bool _loading = false;
+  String? _error;
+
+  bool get loading => _loading;
+  String? get error => _error;
 
   List<Appointment> get all {
     final list = [..._appointments];
@@ -26,24 +32,33 @@ class AppointmentProvider extends ChangeNotifier {
   List<Appointment> get completed => byStatus(AppointmentStatus.completed);
   List<Appointment> get cancelled => byStatus(AppointmentStatus.cancelled);
 
-  Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-    final raw = _prefs!.getString(_kAppointments);
-    if (raw != null) {
-      final list = jsonDecode(raw) as List<dynamic>;
+  int get count => _appointments.length;
+
+  /// Load the patient's appointments. Safe to call when signed out (the request
+  /// would 401) — callers should only invoke it once authenticated.
+  Future<void> load({bool force = false}) async {
+    if (_loading) return;
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final page = await _services.appointments.list(limit: 100);
       _appointments
         ..clear()
-        ..addAll(
-          list.map((e) => Appointment.fromJson(e as Map<String, dynamic>)),
-        );
+        ..addAll(page.data);
+    } on ApiException catch (e) {
+      _error = e.message;
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
-  Future<void> _persist() async {
-    final encoded =
-        jsonEncode(_appointments.map((a) => a.toJson()).toList());
-    await _prefs?.setString(_kAppointments, encoded);
+  /// Drop everything on sign-out.
+  void clear() {
+    _appointments.clear();
+    _error = null;
+    notifyListeners();
   }
 
   bool isSlotBooked(String doctorId, DateTime date, String slotLabel) {
@@ -56,32 +71,61 @@ class AppointmentProvider extends ChangeNotifier {
         a.slotLabel == slotLabel);
   }
 
-  Future<void> book(Appointment appointment) async {
-    _appointments.add(appointment);
-    await _persist();
+  /// Book an appointment. Returns the created record (server-authoritative).
+  /// Throws [ApiException] on failure (e.g. 409 if the slot was just taken).
+  Future<Appointment> book({
+    required String doctorId,
+    required DateTime dateTime,
+    required String slotLabel,
+    required int fee,
+    required PaymentMethod paymentMethod,
+    String? patientName,
+    int? patientAge,
+    String? patientBloodGroup,
+    String? patientType,
+    String? paymentStatus,
+  }) async {
+    final created = await _services.appointments.create(
+      doctorId: doctorId,
+      dateTime: dateTime,
+      slotLabel: slotLabel,
+      fee: fee,
+      paymentMethod: paymentMethod.index,
+      patientName: patientName,
+      patientAge: patientAge,
+      patientBloodGroup: patientBloodGroup,
+      patientType: patientType,
+      paymentStatus: paymentStatus,
+    );
+    _appointments.add(created);
     notifyListeners();
+    return created;
   }
 
-  Future<void> cancel(String id) async {
-    final a = _appointments.firstWhere((e) => e.id == id);
-    a.status = AppointmentStatus.cancelled;
-    await _persist();
-    notifyListeners();
-  }
+  Future<void> cancel(String id) =>
+      _patch(id, {'status': AppointmentStatus.cancelled.index});
 
-  Future<void> markCompleted(String id) async {
-    final a = _appointments.firstWhere((e) => e.id == id);
-    a.status = AppointmentStatus.completed;
-    await _persist();
-    notifyListeners();
-  }
+  Future<void> markCompleted(String id) =>
+      _patch(id, {'status': AppointmentStatus.completed.index});
 
+  /// Mark an appointment as reviewed. The review POST already flags it
+  /// server-side (via `appointmentId`), so this updates the local copy only.
   Future<void> markReviewed(String id) async {
-    final a = _appointments.firstWhere((e) => e.id == id);
-    a.reviewed = true;
-    await _persist();
-    notifyListeners();
+    final i = _appointments.indexWhere((a) => a.id == id);
+    if (i >= 0) {
+      _appointments[i].reviewed = true;
+      notifyListeners();
+    }
   }
 
-  int get count => _appointments.length;
+  Future<void> _patch(String id, Map<String, dynamic> changes) async {
+    final updated = await _services.appointments.patch(id, changes);
+    final i = _appointments.indexWhere((a) => a.id == id);
+    if (i >= 0) {
+      _appointments[i] = updated;
+    } else {
+      _appointments.add(updated);
+    }
+    notifyListeners();
+  }
 }

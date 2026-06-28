@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/auth_api.dart';
 import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
@@ -58,34 +59,33 @@ class _SignUpScreenState extends State<SignUpScreen> {
   Future<void> _continue() async {
     if (!_validate()) return;
     final auth = context.read<AuthProvider>();
-
-    if (auth.phoneExists(_phone.text.trim())) {
-      setState(() => _phoneError = 'An account with this number already exists.');
-      return;
-    }
+    final phone = _phone.text.trim();
 
     setState(() => _loading = true);
-    await auth.sendOtp(_phone.text.trim());
+    // Requesting a sign-up OTP also enforces "number is free" server-side.
+    final otpError = await auth.requestSignupOtp(phone);
     if (!mounted) return;
     setState(() => _loading = false);
+    if (otpError != null) {
+      setState(() => _phoneError = otpError);
+      return;
+    }
 
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OtpVerificationScreen(
-          phone: _phone.text.trim(),
+          phone: phone,
+          purpose: OtpPurpose.signup,
           title: 'Verify your number',
-          onVerified: () async {
+          onVerified: (code) async {
             final error = await auth.signUp(
               username: _username.text.trim(),
-              phone: _phone.text.trim(),
+              phone: phone,
               password: _password.text,
+              otp: code,
             );
             if (error != null) return error;
-            await auth.signIn(
-              phone: _phone.text.trim(),
-              password: _password.text,
-              rememberMe: true,
-            );
+            // signUp signs the patient in — go straight to the app.
             if (!mounted) return null;
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (_) => const MainShell()),

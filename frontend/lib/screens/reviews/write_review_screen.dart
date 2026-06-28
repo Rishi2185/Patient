@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../models/appointment.dart';
 import '../../state/appointment_provider.dart';
-import '../../state/auth_provider.dart';
 import '../../state/review_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
@@ -49,21 +48,28 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       return;
     }
     setState(() => _submitting = true);
-    final auth = context.read<AuthProvider>();
-    context.read<ReviewProvider>().addReview(
-          doctorId: widget.appointment.doctorId,
-          patientName: auth.user?.username ?? 'Patient',
-          rating: _rating.toDouble(),
-          comment: _comment.text.trim().isEmpty
-              ? 'Had a good experience.'
-              : _comment.text.trim(),
-          date: DateTime.now(),
-        );
-    await context
-        .read<AppointmentProvider>()
-        .markReviewed(widget.appointment.id);
+    final reviews = context.read<ReviewProvider>();
+    final appointments = context.read<AppointmentProvider>();
 
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // The backend derives the patient from the token and (via appointmentId)
+    // marks the appointment as reviewed.
+    final error = await reviews.submitReview(
+      doctorId: widget.appointment.doctorId,
+      rating: _rating,
+      comment: _comment.text.trim().isEmpty
+          ? 'Had a good experience.'
+          : _comment.text.trim(),
+      appointmentId: widget.appointment.id,
+    );
+    if (!mounted) return;
+    if (error != null) {
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+
+    await appointments.markReviewed(widget.appointment.id);
     if (!mounted) return;
     Navigator.of(context).pop(true);
     ScaffoldMessenger.of(context).showSnackBar(

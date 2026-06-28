@@ -7,7 +7,13 @@
       "Bash(flutter pub *)",
       "Bash(flutter analyze *)",
       "Bash(flutter test *)",
-      "Bash(flutter build *)"
+      "Bash(flutter build *)",
+      "Bash(find lib/api -type f)",
+      "Bash(ls -la lib/state/ lib/widgets/)",
+      "Bash(ls data/)",
+      "Bash(ls utils/)",
+      "Bash(echo \"exit: $?\")",
+      "Read(//d/d/SDK/Work/Aarvy/Patient/backend/src/**)"
     ]
   }
 }
